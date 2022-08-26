@@ -4,25 +4,27 @@ version = "0.1.0"
 authors = ["Adamaq01 <adamthibert01@gmail.com>"]
 edition = "2021"
 license = "MIT"
-description = "A simple runtime hooking library"
+description = "A simple hooking library"
 readme = "README.md"
 repository = "https://github.com/Adamaq01/crochet"
-keywords = ["runtime", "hooking", "hook", "detour", "dll"]
+documentation = "https://docs.rs/crochet"
+keywords = ["hooking", "hook", "detour", "dll", "so"]
 
 [lib]
 proc-macro = true
 
 [dependencies]
-detour = { git = "https://github.com/Adamaq01/detour-rs", rev = "dce8f68", default-features = false }
 syn = { version = "1", features = ["full"] }
 quote = "1"
 proc-macro2 = "1"
-lazy_static = "1.4"
 convert_case = "0.5"
+detour = { package = "detour2", version = "0.9", default-features = false }
+dlopen2 = "0.4"
+lazy_static = "1.4"
 
 [[example]]
 name = "messageboxw"
 crate-type = ["cdylib"]
 
 [target."cfg(windows)".dev-dependencies]
-winapi = { version = "0.3.9", features = ["minwindef", "windef", "libloaderapi"] }
+winapi = { version = "0.3.9", features = ["minwindef", "windef"] }

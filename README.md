@@ -20,23 +20,25 @@ use winapi::um::winnt::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH, LPCWSTR};
 
 #[no_mangle]
 #[allow(non_snake_case, unused_variables)]
-extern "system" fn DllMain(
-    dll_module: HINSTANCE,
-    call_reason: DWORD,
-    reserved: LPVOID,
-) -> BOOL {
+extern "system" fn DllMain(dll_module: HINSTANCE, call_reason: DWORD, reserved: LPVOID) -> BOOL {
     match call_reason {
-        DLL_PROCESS_ATTACH => crochet::enable!(messageboxw_hook).expect("Could not enable messageboxw hook"),
-        DLL_PROCESS_DETACH => crochet::disable!(messageboxw_hook).expect("Could not disable messageboxw hook"),
+        DLL_PROCESS_ATTACH => {
+            crochet::enable!(messageboxw_hook).expect("Could not enable messageboxw hook")
+        }
+        DLL_PROCESS_DETACH => {
+            crochet::disable!(messageboxw_hook).expect("Could not disable messageboxw hook")
+        }
         _ => {}
     }
 
     TRUE
 }
 
-#[crochet::hook("user32.dll", "MessageBoxW")]
+#[crochet::hook(compile_check, "user32.dll", "MessageBoxW")]
 fn messageboxw_hook(hwnd: HWND, _text: LPCWSTR, caption: LPCWSTR, u_type: UINT) -> c_int {
-    let text = "Tu as fait mouche, Mouche !\0".encode_utf16().collect::<Vec<u16>>();
+    let text = "Tu as fait mouche, Mouche !\0"
+        .encode_utf16()
+        .collect::<Vec<u16>>();
 
     call_original!(hwnd, text.as_ptr(), caption, u_type)
 }
