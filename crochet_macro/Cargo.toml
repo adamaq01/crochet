@@ -1,0 +1,16 @@
+[package]
+name = "crochet_macro"
+version = "0.1.0"
+authors = ["Adamaq01 <adamthibert01@gmail.com>"]
+edition = "2021"
+license = "MIT"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "1", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
+convert_case = "0.5"
+dlopen2 = "0.4"

@@ -10,14 +10,8 @@ repository = "https://github.com/Adamaq01/crochet"
 documentation = "https://docs.rs/crochet"
 keywords = ["hooking", "hook", "detour", "dll", "so"]
 
-[lib]
-proc-macro = true
-
 [dependencies]
-syn = { version = "1", features = ["full"] }
-quote = "1"
-proc-macro2 = "1"
-convert_case = "0.5"
+crochet_macro = { path = "./crochet_macro" }
 detour = { package = "detour2", version = "0.9", default-features = false }
 dlopen2 = "0.4"
 lazy_static = "1.4"
