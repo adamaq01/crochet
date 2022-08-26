@@ -11,7 +11,7 @@ documentation = "https://docs.rs/crochet"
 keywords = ["hooking", "hook", "detour", "dll", "so"]
 
 [dependencies]
-crochet_macro = { path = "./crochet_macro" }
+crochet_macro = { path = "./crochet_macro", version = "0.1.0" }
 detour = { package = "detour2", version = "0.9", default-features = false }
 dlopen2 = "0.4"
 lazy_static = "1.4"
