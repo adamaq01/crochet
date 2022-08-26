@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Adamaq01 <adamthibert01@gmail.com>"]
 edition = "2021"
 license = "MIT"
+description = "A simple hooking library"
 
 [lib]
 proc-macro = true
