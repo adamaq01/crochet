@@ -6,6 +6,7 @@ use syn::{
     parse::Parse, parse_macro_input, parse_quote, token, AttrStyle, ExprPath, Ident, LitBool,
     LitStr, Stmt, Token,
 };
+use syn::spanned::Spanned;
 
 mod kw {
     syn::custom_keyword!(library);
@@ -95,6 +96,57 @@ impl Parse for HookAttrs {
             Err(syn::Error::new(
                 Span::call_site(),
                 "Missing library and symbol",
+            ))
+        }
+    }
+}
+
+struct LoadAttrs {
+    library: LitStr,
+    compile_check: bool,
+}
+
+impl Parse for LoadAttrs {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let mut library = None;
+        let mut compile_check = false;
+        while !input.is_empty() {
+            let look = input.lookahead1();
+            if look.peek(kw::library) {
+                input.parse::<kw::library>()?;
+                input.parse::<Token![=]>()?;
+                library = Some(input.parse::<LitStr>()?);
+            } else if look.peek(kw::compile_check) {
+                input.parse::<kw::compile_check>()?;
+                let look = input.lookahead1();
+                if look.peek(Token![=]) {
+                    input.parse::<Token![=]>()?;
+                    compile_check = input.parse::<LitBool>()?.value;
+                } else {
+                    compile_check = true;
+                }
+            } else if look.peek(LitBool) {
+                compile_check = input.parse::<LitBool>()?.value;
+            } else if library.is_none() {
+                library = Some(input.parse::<LitStr>()?);
+            } else {
+                return Err(look.error());
+            };
+            if input.is_empty() {
+                break;
+            }
+            input.parse::<Token![,]>()?;
+        }
+
+        if let Some(library) = library {
+            Ok(LoadAttrs {
+                library,
+                compile_check,
+            })
+        } else {
+            Err(syn::Error::new(
+                Span::call_site(),
+                "Missing library",
             ))
         }
     }
@@ -368,4 +420,239 @@ pub fn is_enabled(attrs: TokenStream) -> TokenStream {
         #hook()
     )
         .into()
+}
+
+///
+///
+/// # Example
+///
+/// ```rust
+/// #[crochet::load("library.so", compile_check)]
+/// extern "C" {
+///     #[symbol("a_function")]
+///     fn my_super_function(); // Resolves to `a_function` in `library.so`
+///     fn another_function();
+/// }
+/// ```
+///
+/// # Attributes
+///
+/// - `library`: the name of the dynamic library to load.
+/// - `compile_check`: whether to check if the library and symbol are available at compile time.
+/// - `symbol`: the name of the function to load.
+///
+/// The macro attributes syntax is very flexible as it follows the same rules as the [`#[crochet::hook]` attribute](./macro.hook.html).
+///
+/// # Panics
+///
+/// Panics if the dynamic library or the function cannot be found at runtime.
+#[proc_macro_attribute]
+pub fn load(attrs: TokenStream, input: TokenStream) -> TokenStream {
+    let mod_foreign = parse_macro_input!(input as syn::ItemForeignMod);
+    let attrs = parse_macro_input!(attrs as LoadAttrs);
+    let library = attrs.library;
+    let compile_check = attrs.compile_check;
+
+    let mut symbols = Vec::new();
+    for item in mod_foreign.items {
+        if let syn::ForeignItem::Fn(mod_fn) = item {
+            if mod_fn.attrs.len() > 1 || (mod_fn.attrs.len() == 1 && !mod_fn.attrs[0].path.is_ident("symbol")) {
+                return syn::Error::new(
+                    mod_fn.span(),
+                    "Only symbol attribute is allowed here",
+                ).to_compile_error().into();
+            }
+
+            let (symbol, span) = {
+                let symbol = mod_fn.attrs.first().map(|attr| {
+                    let lit = attr.parse_args::<LitStr>()
+                        .map_err(|_| syn::Error::new(attr.span(), "Invalid symbol attribute").to_compile_error())?;
+
+                    Ok((lit.value(), attr.tokens.span()))
+                }).unwrap_or_else(|| Ok((mod_fn.sig.ident.to_string(), mod_fn.sig.ident.span())));
+
+                if let Ok((symbol, span)) = symbol {
+                    (symbol, span)
+                } else {
+                    return symbol.unwrap_err();
+                }
+            };
+
+            if compile_check {
+                let result: syn::Result<()> = (|| unsafe {
+                    dlopen2::raw::Library::open(library.value())
+                        .map_err(|e| syn::Error::new(Span::call_site(), e))?
+                        .symbol::<*const ()>(symbol.as_str())
+                        .map_err(|e| syn::Error::new(span, e))?;
+
+                    Ok(())
+                })();
+                if let Err(e) = result {
+                    return e.to_compile_error().into();
+                }
+            }
+
+            symbols.push(Symbol {
+                symbol: LitStr::new(symbol.as_str(), mod_fn.sig.ident.span()),
+                visibility: mod_fn.vis,
+                signature: mod_fn.sig,
+            });
+        } else {
+            return syn::Error::new(item.span(), "Only functions are supported in crochet::load!").to_compile_error().into();
+        }
+    }
+
+    let _const = Ident::new(
+        format!(
+            "_{}",
+            library.value()
+                .replace('.', "_")
+                .to_case(Case::UpperSnake)
+        )
+            .as_str(),
+        Span::call_site(),
+    );
+
+    let _type = Ident::new(
+        format!(
+            "_{}",
+            library.value()
+                .replace('.', "_")
+                .to_case(Case::Pascal)
+        )
+            .as_str(),
+        Span::call_site(),
+    );
+    let symbols = Symbols(_type.clone(), symbols);
+
+    let mut tokens_declaration = proc_macro2::TokenStream::new();
+    if let Err(e) = symbols.to_tokens(Phase::StructDeclaration, &mut tokens_declaration) {
+        return e.into();
+    }
+
+    let mut tokens_definition = proc_macro2::TokenStream::new();
+    if let Err(e) = symbols.to_tokens(Phase::StructDefinition, &mut tokens_definition) {
+        return e.into();
+    }
+
+    let mut tokens_func_definitions = proc_macro2::TokenStream::new();
+    if let Err(e) = symbols.to_tokens(Phase::FunctionDefinition { _const: _const.clone() }, &mut tokens_func_definitions) {
+        return e.into();
+    }
+
+    quote!(
+        #[allow(missing_copy_implementations)]
+        #[allow(non_camel_case_types)]
+        #tokens_declaration
+
+        crochet::lazy_static::lazy_static! {
+            static ref #_const: #_type = unsafe {
+                let library = crochet::dlopen2::raw::Library::open(#library)
+                    .expect("Could not open library");
+
+                #tokens_definition
+            };
+        }
+
+        #tokens_func_definitions
+    ).into()
+}
+
+#[derive(Debug, Clone)]
+enum Phase {
+    StructDeclaration,
+    StructDefinition,
+    FunctionDefinition {
+        _const: Ident,
+    },
+}
+
+struct Symbol {
+    symbol: syn::LitStr,
+    visibility: syn::Visibility,
+    signature: syn::Signature,
+}
+
+impl Symbol {
+    fn to_tokens(&self, phase: Phase, tokens: &mut proc_macro2::TokenStream) -> Result<(), TokenStream2> {
+        let ident = self.signature.ident.clone();
+        let args_tokens = self.signature.inputs.iter().map(remove_mut);
+        let return_tokens = self.signature.output.to_token_stream();
+        let signature = self.signature.clone();
+        let _const = Ident::new("_const", Span::call_site());
+        let err_message = LitStr::new(format!("Could not find symbol {}", self.symbol.value()).as_str(), Span::call_site());
+
+        match phase {
+            Phase::StructDeclaration => {
+                quote!(
+                    #ident: extern "C" fn(#(#args_tokens),*) #return_tokens,
+                ).to_tokens(tokens);
+            }
+            Phase::StructDefinition => {
+                let symbol = self.symbol.clone();
+                quote!(
+                    #ident: library.symbol::<extern "C" fn(#(#args_tokens),*) #return_tokens>(#symbol)
+                        .expect(#err_message),
+                ).to_tokens(tokens);
+            }
+            Phase::FunctionDefinition { _const } => {
+                let visibility = self.visibility.clone();
+                let mut args_names = Vec::with_capacity(self.signature.inputs.len());
+                for arg in self.signature.inputs.clone() {
+                    let mut pushed = false;
+                    if let syn::FnArg::Typed(syn::PatType { pat, .. }) = arg {
+                        if let syn::Pat::Ident(syn::PatIdent { ident, .. }) = *pat {
+                            args_names.push(ident);
+                            pushed = true;
+                        }
+                    }
+                    if !pushed {
+                        return Err(syn::Error::new(signature.span(), "Invalid argument").to_compile_error());
+                    }
+                }
+                quote!(
+                    #visibility unsafe fn #ident(#(#args_tokens),*) #return_tokens {
+                        (#_const.#ident)(#(#args_names),*)
+                    }
+                ).to_tokens(tokens);
+            }
+        }
+
+        Ok(())
+    }
+}
+
+struct Symbols(Ident, Vec<Symbol>);
+
+impl Symbols {
+    fn to_tokens(&self, phase: Phase, tokens: &mut proc_macro2::TokenStream) -> Result<(), TokenStream2> {
+        let ident = self.0.clone();
+
+        let mut stream = TokenStream2::new();
+        for symbol in &self.1 {
+            symbol.to_tokens(phase.clone(), &mut stream)?;
+        }
+
+        match phase {
+            Phase::StructDeclaration => {
+                quote!(
+                    struct #ident {
+                        #stream
+                    }
+                ).to_tokens(tokens);
+            }
+            Phase::StructDefinition => {
+                quote!(
+                    #ident {
+                        #stream
+                    }
+                ).to_tokens(tokens);
+            }
+            Phase::FunctionDefinition { _const } => {
+                tokens.extend(stream);
+            }
+        }
+
+        Ok(())
+    }
 }
