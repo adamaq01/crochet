@@ -7,7 +7,7 @@ heavily inspired by [skyline-rs](https://github.com/ultimate-research/skyline-rs
 
 ```toml
 [dependencies]
-crochet = "0.1"
+crochet = "0.2"
 ```
 
 ## Usage

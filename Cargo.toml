@@ -1,6 +1,6 @@
 [package]
 name = "crochet"
-version = "0.1.1"
+version = "0.2.0"
 authors = ["Adamaq01 <adamthibert01@gmail.com>"]
 edition = "2021"
 license = "MIT"
@@ -11,7 +11,7 @@ documentation = "https://docs.rs/crochet"
 keywords = ["hooking", "hook", "detour", "dll", "so"]
 
 [dependencies]
-crochet_macro = { path = "./crochet_macro", version = "0.1.0" }
+crochet_macro = { path = "./crochet_macro", version = "0.2.0" }
 detour = { package = "detour2", version = "0.9", default-features = false }
 dlopen2 = "0.4"
 lazy_static = "1.4"
