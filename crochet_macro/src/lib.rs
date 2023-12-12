@@ -229,12 +229,14 @@ pub fn hook(attrs: TokenStream, input: TokenStream) -> TokenStream {
     });
 
     // extern "C"
-    mod_fn.sig.abi = Some(syn::Abi {
-        extern_token: syn::token::Extern {
-            span: Span::call_site(),
-        },
-        name: Some(LitStr::new("C", Span::call_site())),
-    });
+    if mod_fn.sig.abi.is_none() {
+        mod_fn.sig.abi = Some(syn::Abi {
+            extern_token: syn::token::Extern {
+                span: Span::call_site(),
+            },
+            name: Some(LitStr::new("system", Span::call_site())),
+        });
+    }
 
     let args_tokens = mod_fn.sig.inputs.iter().map(remove_mut);
     let return_tokens = mod_fn.sig.output.to_token_stream();
