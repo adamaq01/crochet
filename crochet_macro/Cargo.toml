@@ -1,6 +1,6 @@
 [package]
 name = "crochet_macro"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Adamaq01 <adamthibert01@gmail.com>"]
 edition = "2021"
 license = "MIT"
@@ -13,5 +13,5 @@ proc-macro = true
 syn = { version = "1", features = ["full"] }
 quote = "1"
 proc-macro2 = "1"
-convert_case = "0.5"
-dlopen2 = "0.4"
+convert_case = "0.6"
+dlopen2 = "0.6"
