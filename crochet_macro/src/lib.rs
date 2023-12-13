@@ -290,7 +290,7 @@ pub fn hook(attrs: TokenStream, input: TokenStream) -> TokenStream {
         tokens: TokenStream2::new(),
     });
 
-    // extern "C"
+    // extern "system"
     if mod_fn.sig.abi.is_none() {
         mod_fn.sig.abi = Some(syn::Abi {
             extern_token: syn::token::Extern {
@@ -322,7 +322,7 @@ pub fn hook(attrs: TokenStream, input: TokenStream) -> TokenStream {
         macro_rules! original {
             () => {
                 unsafe {
-                    ::core::mem::transmute::<_, extern "C" fn(#(#args_tokens),*) #return_tokens>(
+                    ::core::mem::transmute::<_, extern "system" fn(#(#args_tokens),*) #return_tokens>(
                         #_const.trampoline()
                     )
                 }
@@ -497,7 +497,7 @@ pub fn is_enabled(attrs: TokenStream) -> TokenStream {
 ///
 /// ```rust
 /// #[crochet::load("library.so", compile_check)]
-/// extern "C" {
+/// extern "system" {
 ///     #[symbol("a_function")]
 ///     fn my_super_function(); // Resolves to `a_function` in `library.so`
 ///     fn another_function();
@@ -654,13 +654,13 @@ impl Symbol {
         match phase {
             Phase::StructDeclaration => {
                 quote!(
-                    #ident: extern "C" fn(#(#args_tokens),*) #return_tokens,
+                    #ident: extern "system" fn(#(#args_tokens),*) #return_tokens,
                 ).to_tokens(tokens);
             }
             Phase::StructDefinition => {
                 let symbol = self.symbol.clone();
                 quote!(
-                    #ident: library.symbol::<extern "C" fn(#(#args_tokens),*) #return_tokens>(#symbol)
+                    #ident: library.symbol::<extern "system" fn(#(#args_tokens),*) #return_tokens>(#symbol)
                         .expect(#err_message),
                 ).to_tokens(tokens);
             }
