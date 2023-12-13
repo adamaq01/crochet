@@ -12,10 +12,65 @@ mod kw {
     syn::custom_keyword!(library);
     syn::custom_keyword!(symbol);
     syn::custom_keyword!(compile_check);
+    syn::custom_keyword!(_self);
+    syn::custom_keyword!(self_);
+    syn::custom_keyword!(this);
+}
+
+#[derive(Clone)]
+enum StrOrSelf {
+    SelfValue(Span),
+    LitStr(LitStr),
+}
+
+impl StrOrSelf {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let look = input.lookahead1();
+        if look.peek(Token![self]) {
+            input.parse::<Token![self]>().map(|token| token.span()).map(Self::SelfValue)
+        } else if look.peek(kw::_self) {
+            input.parse::<kw::_self>().map(|token| token.span()).map(Self::SelfValue)
+        } else if look.peek(kw::self_) {
+            input.parse::<kw::self_>().map(|token| token.span()).map(Self::SelfValue)
+        } else if look.peek(kw::this) {
+            input.parse::<kw::this>().map(|token| token.span()).map(Self::SelfValue)
+        } else {
+            input.parse::<LitStr>().map(Self::LitStr)
+        }
+    }
+
+    #[allow(dead_code)]
+    fn is_self(&self) -> bool {
+        match self {
+            Self::SelfValue(_) => true,
+            Self::LitStr(_) => false,
+        }
+    }
+
+    fn is_lit(&self) -> bool {
+        match self {
+            Self::SelfValue(_) => false,
+            Self::LitStr(_) => true,
+        }
+    }
+
+    fn unwrap_lit(self) -> LitStr {
+        match self {
+            Self::SelfValue(_) => panic!("Cannot unwrap self"),
+            Self::LitStr(lit) => lit,
+        }
+    }
+
+    fn span(&self) -> Span {
+        match self {
+            Self::SelfValue(self_value) => *self_value,
+            Self::LitStr(lit) => lit.span(),
+        }
+    }
 }
 
 struct HookAttrs {
-    library: LitStr,
+    library: StrOrSelf,
     symbol: LitStr,
     compile_check: bool,
 }
@@ -31,9 +86,9 @@ impl Parse for HookAttrs {
             if look.peek(kw::library) {
                 input.parse::<kw::library>()?;
                 input.parse::<Token![=]>()?;
-                library = Some(input.parse::<LitStr>()?);
-                if symbol.is_none() && unknown.is_some() {
-                    symbol = unknown;
+                library = Some(StrOrSelf::parse(input)?);
+                if symbol.is_none() && unknown.is_some() && unknown.as_ref().is_some_and(StrOrSelf::is_lit) {
+                    symbol = Some(unknown.unwrap().unwrap_lit());
                     unknown = None;
                 }
             } else if look.peek(kw::symbol) {
@@ -56,11 +111,11 @@ impl Parse for HookAttrs {
             } else if look.peek(LitBool) {
                 compile_check = input.parse::<LitBool>()?.value;
             } else if library.is_none() && symbol.is_none() && unknown.is_none() {
-                unknown = Some(input.parse::<LitStr>()?);
+                unknown = Some(StrOrSelf::parse(input)?);
             } else if symbol.is_none() {
                 symbol = Some(input.parse::<LitStr>()?);
             } else if library.is_none() {
-                library = Some(input.parse::<LitStr>()?);
+                library = Some(StrOrSelf::parse(input)?);
             } else {
                 return Err(look.error());
             };
@@ -73,8 +128,8 @@ impl Parse for HookAttrs {
         if let Some(unknown) = unknown {
             if library.is_none() && symbol.is_none() {
                 library = Some(unknown);
-            } else if library.is_some() {
-                symbol = Some(unknown);
+            } else if library.is_some() && unknown.is_lit() {
+                symbol = Some(unknown.unwrap_lit());
             } else if symbol.is_some() {
                 library = Some(unknown);
             } else {
@@ -166,6 +221,13 @@ fn remove_mut(arg: &syn::FnArg) -> syn::FnArg {
     arg
 }
 
+fn open_library(token: StrOrSelf) -> Result<dlopen2::raw::Library, dlopen2::Error> {
+    match token {
+        StrOrSelf::SelfValue(_) => dlopen2::raw::Library::open_self(),
+        StrOrSelf::LitStr(lit) => dlopen2::raw::Library::open(lit.value())
+    }
+}
+
 /// Hooks a function in a dynamic library with the body of the attached function.
 ///
 /// # Example
@@ -180,7 +242,7 @@ fn remove_mut(arg: &syn::FnArg) -> syn::FnArg {
 ///
 /// # Attributes
 ///
-/// - `library`: the name of the dynamic library to hook.
+/// - `library`: the name of the dynamic library to hook or one of `self`, `_self`, `self_` or `this`.
 /// - `symbol`: the name of the function to hook.
 /// - `compile_check`: whether to check if the library and symbol are available at compile time.
 ///
@@ -284,7 +346,7 @@ pub fn hook(attrs: TokenStream, input: TokenStream) -> TokenStream {
 
     if attrs.compile_check {
         let result: syn::Result<()> = (|| unsafe {
-            dlopen2::raw::Library::open(library.value())
+            open_library(library.clone())
                 .map_err(|e| syn::Error::new(Span::call_site(), e))?
                 .symbol::<*const ()>(symbol.value().as_str())
                 .map_err(|e| syn::Error::new(Span::call_site(), e))?;
@@ -296,10 +358,15 @@ pub fn hook(attrs: TokenStream, input: TokenStream) -> TokenStream {
         }
     }
 
+    let open_library = match library {
+        StrOrSelf::SelfValue(_) => quote!(crochet::dlopen2::raw::Library::open_self()),
+        StrOrSelf::LitStr(lit) => quote!(crochet::dlopen2::raw::Library::open(#lit)),
+    };
+
     quote!(
         crochet::lazy_static::lazy_static! {
             static ref #_const: crochet::detour::RawDetour = unsafe {
-                let symbol = crochet::dlopen2::raw::Library::open(#library)
+                let symbol = #open_library
                     .expect("Could not open library")
                     .symbol::<*const ()>(#symbol)
                     .expect("Could not find symbol in library");
