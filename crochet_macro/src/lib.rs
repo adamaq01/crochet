@@ -299,6 +299,7 @@ pub fn hook(attrs: TokenStream, input: TokenStream) -> TokenStream {
             name: Some(LitStr::new("system", Span::call_site())),
         });
     }
+    let abi = mod_fn.sig.abi.clone().unwrap().name.map(|lit| lit.value()).unwrap_or("system".to_string());
 
     let args_tokens = mod_fn.sig.inputs.iter().map(remove_mut);
     let return_tokens = mod_fn.sig.output.to_token_stream();
@@ -322,7 +323,7 @@ pub fn hook(attrs: TokenStream, input: TokenStream) -> TokenStream {
         macro_rules! original {
             () => {
                 unsafe {
-                    ::core::mem::transmute::<_, extern "system" fn(#(#args_tokens),*) #return_tokens>(
+                    ::core::mem::transmute::<_, extern #abi fn(#(#args_tokens),*) #return_tokens>(
                         #_const.trampoline()
                     )
                 }
@@ -518,6 +519,7 @@ pub fn is_enabled(attrs: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn load(attrs: TokenStream, input: TokenStream) -> TokenStream {
     let mod_foreign = parse_macro_input!(input as syn::ItemForeignMod);
+    let abi = mod_foreign.abi.clone().name.map(|lit| lit.value()).unwrap_or("system".to_string());
     let attrs = parse_macro_input!(attrs as LoadAttrs);
     let library = attrs.library;
     let compile_check = attrs.compile_check;
@@ -595,17 +597,17 @@ pub fn load(attrs: TokenStream, input: TokenStream) -> TokenStream {
     let symbols = Symbols(_type.clone(), symbols);
 
     let mut tokens_declaration = proc_macro2::TokenStream::new();
-    if let Err(e) = symbols.to_tokens(Phase::StructDeclaration, &mut tokens_declaration) {
+    if let Err(e) = symbols.to_tokens(Phase::StructDeclaration, abi.as_str(), &mut tokens_declaration) {
         return e.into();
     }
 
     let mut tokens_definition = proc_macro2::TokenStream::new();
-    if let Err(e) = symbols.to_tokens(Phase::StructDefinition, &mut tokens_definition) {
+    if let Err(e) = symbols.to_tokens(Phase::StructDefinition, abi.as_str(), &mut tokens_definition) {
         return e.into();
     }
 
     let mut tokens_func_definitions = proc_macro2::TokenStream::new();
-    if let Err(e) = symbols.to_tokens(Phase::FunctionDefinition { _const: _const.clone() }, &mut tokens_func_definitions) {
+    if let Err(e) = symbols.to_tokens(Phase::FunctionDefinition { _const: _const.clone() }, abi.as_str(), &mut tokens_func_definitions) {
         return e.into();
     }
 
@@ -643,7 +645,7 @@ struct Symbol {
 }
 
 impl Symbol {
-    fn to_tokens(&self, phase: Phase, tokens: &mut proc_macro2::TokenStream) -> Result<(), TokenStream2> {
+    fn to_tokens(&self, phase: Phase, abi: &str, tokens: &mut proc_macro2::TokenStream) -> Result<(), TokenStream2> {
         let ident = self.signature.ident.clone();
         let args_tokens = self.signature.inputs.iter().map(remove_mut);
         let return_tokens = self.signature.output.to_token_stream();
@@ -654,13 +656,13 @@ impl Symbol {
         match phase {
             Phase::StructDeclaration => {
                 quote!(
-                    #ident: extern "system" fn(#(#args_tokens),*) #return_tokens,
+                    #ident: extern #abi fn(#(#args_tokens),*) #return_tokens,
                 ).to_tokens(tokens);
             }
             Phase::StructDefinition => {
                 let symbol = self.symbol.clone();
                 quote!(
-                    #ident: library.symbol::<extern "system" fn(#(#args_tokens),*) #return_tokens>(#symbol)
+                    #ident: library.symbol::<extern #abi fn(#(#args_tokens),*) #return_tokens>(#symbol)
                         .expect(#err_message),
                 ).to_tokens(tokens);
             }
@@ -694,12 +696,12 @@ impl Symbol {
 struct Symbols(Ident, Vec<Symbol>);
 
 impl Symbols {
-    fn to_tokens(&self, phase: Phase, tokens: &mut proc_macro2::TokenStream) -> Result<(), TokenStream2> {
+    fn to_tokens(&self, phase: Phase, abi: &str, tokens: &mut proc_macro2::TokenStream) -> Result<(), TokenStream2> {
         let ident = self.0.clone();
 
         let mut stream = TokenStream2::new();
         for symbol in &self.1 {
-            symbol.to_tokens(phase.clone(), &mut stream)?;
+            symbol.to_tokens(phase.clone(), abi, &mut stream)?;
         }
 
         match phase {
