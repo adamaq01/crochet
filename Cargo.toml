@@ -12,7 +12,7 @@ keywords = ["hooking", "hook", "detour", "dll", "so"]
 
 [dependencies]
 crochet_macro = { path = "./crochet_macro", version = "0.2.4" }
-detour = { package = "detour2", version = "0.9", default-features = false }
+detour = { package = "retour", version = "0.4.0-alpha.4" }
 dlopen2 = "0.8"
 
 [[example]]
